@@ -46,6 +46,54 @@
 ;; least until i understand why i should use nnml
 
 
+;;; How to use it
+
+;; Set up
+
+;;  1) in gnus, go to the server buffer (^)
+;;  2) create a new server (a)
+;;  2.1)   method : nntodo
+;;  2.2)   server:  any name but you could just hit enter
+;;  2.3)   open the new server (O)
+;;  2.4)   leave the server buffer (q)
+;;  3) in the group buffer, create a new group (G-m)
+;;  4) group name: whatever you want, by why not todo ?
+;;  4.1) from method: nntodo (+ the server name you entered in 2.2)
+;;  5) set the properties of this new group (subscription level, always visible
+;;       etc
+;;  6) It should be possible to create more than one todo group (one
+;;  for work one for personal, or whatever your heart desires) 
+;;  But one of them must be teh group for short todo items (see
+;;  bellow)
+;;  Set the variable  "todo-short-group" to this group (there should
+;;  be a better way to do this but I dont know)
+;;  The format is nntodo+"server-name":"group-name"
+
+;; Daily use
+
+;; 1) if you receive an e-mail that should go to your todo list just 
+;; copy or move it to the todo group (B-m or B-c)
+;; 2) you will be ask for a delta - that is the time interval for the due date
+;; 2.1) you can enter just a number - to be interpreted as days
+;;      or a number and a character that indicates either weeks or months
+;;      see variables "todo-week-const" and "todo-month-const"
+;;      They are initially set to "s" for weeks and "m" from months
+;;  or enter the third character (see "todo-date-const") to enter a date
+;;  explicitly
+;;
+;; 3) Most, but not all todo items arive by mail, at least for me. So there 
+;;    a function (todo-short) that allows you to create a todo item from scratch
+;;    Just bind it to some nice key. Enter the time interval for the
+;;    due date and the subject - a todo item will show up in the
+;;    approriate group
+;;
+;; 4) when browsing your todo group, the items will be ordered by due
+;; date. Since procastination is a fact of life, there is a function
+;; "gnus-summary-add-time" that will add some time to the item's due
+;; date. Bind it to some nice key (why not "+"?)
+
+
+
 ;;; Code:
 
 ;;; Backend definition:
@@ -367,7 +415,7 @@ With ARG, turn on iff ARG is positive, else turn off."
 
 ;; where the short todo messages go to
 
-(defvar todo-short-group "nntodo:todo")
+(defvar todo-short-group "nntodo:todolist")
 
 (defun todo-short ()
   (interactive)
