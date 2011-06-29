@@ -2,10 +2,12 @@
 
 ;; Copyright (C) 1999 by Kai Grossjohann.
 
-;; Authors: Kai.Grossjohann@CS.Uni-Dortmund.DE,
+;; Authors: Jaime Casanova <jcasanov@systemguards.com.ec>
+;;          Jacques Wainer wainer@ic.unicamp.br
+;;          Kai.Grossjohann@CS.Uni-Dortmund.DE,
 ;;          John Wiegley <johnw@gnu.org>
 ;; Keywords: news, mail, calendar, convenience
-;; Version: $Id: nntodo.el,v 1.1 2001/04/19 22:12:42 johnw Exp $
+;; Version: $Id: nntodo.el,v 1.6 2011/06/29 22:12:42 jcasanov Exp $
 
 ;; This file is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -24,19 +26,25 @@
 
 ;;; Commentary:
 
-;; Warning: this is alpha code!  Use at your own risk!  Don your
-;; asbestos longjohns!  Might eat your mail for lunch!
+;; Warning: this is beta code!  Use at your own risk!  
 
 ;; This file provides a new Gnus backend, nntodo, for storing todo
-;; items.  Each todo item is a message but has a special header
-;; `X-Todo-Priority' for the priority of a todo item.  It is possible
-;; to sort todo items by creation date and by priority.  Sorting by
-;; due date hasn't been done yet.
+;; items.  Each todo item is a message but has two special headers
+;; `X-Todo-Priority' and `X-Todo-DueDate' for the priority and the 
+;; due date of a todo item, respectively.  It is possible
+;; to sort todo items by due date and by priority.  
 
 ;;; Kudos:
 
 ;; Dan Nicolaescu <dann@ics.uci.edu> for providing me with a first
 ;; implementation to look at and steal from.
+
+
+;; This code is a merge between Jacques Wainer and Kai.Grossjohann@CS.Uni-Dortmund.DE,
+;; versions. 
+;; Jacques version changes nnmbox by nnml, but i returned to nnmbox at 
+;; least until i understand why i should use nnml
+
 
 ;;; Code:
 
@@ -48,6 +56,22 @@
 (require 'nnmbox)
 (require 'nnoo)
 (require 'cl)
+(require 'calendar)
+(require 'gnus-msg)
+
+
+;; nntodo variables
+
+;; how to print a calendar date - see 
+(defvar todo-calendar-format '((format "%02d-%02d-%4d" (string-to-number day) (string-to-number month) (string-to-number  year))))
+
+;; charaters to indicate week and month
+(defvar todo-week-const "s")
+(defvar todo-month-const "m")
+
+;; character to indicate that I want to enter an explicit date
+(defvar todo-date-const "d")
+
 
 (nnoo-declare nntodo nnmbox)
 
@@ -68,7 +92,7 @@
 
 (defvoo nntodo-current-group "" nil nnmbox-current-group)
 
-(defconst nntodo-version "1.4")
+(defconst nntodo-version "1.6")
 (defvoo nntodo-status-string "" nil nnmbox-status-string)
 
 (nnoo-define-basics nntodo)
@@ -119,21 +143,22 @@
   (gnus-group-set-parameter
    (gnus-group-prefixed-name group (list "nntodo" server))
    'gcc-self t)
-  ;; default is to sort by priority, then by number
+  ;; default is to sort by due date, then by priority and then by number
   (gnus-group-set-parameter
    (gnus-group-prefixed-name group (list "nntodo" server))
    'gnus-thread-sort-functions
    '('(gnus-thread-sort-by-number
-       gnus-thread-sort-by-priority)))
+       gnus-thread-sort-by-priority
+       gnus-thread-sort-by-duedate)))
   ;; Enter gnus-todo-mode in nntodo summaries.
   (gnus-group-set-parameter
    (gnus-group-prefixed-name group (list "nntodo" server))
    'dummy
    '( (gnus-todo-mode 1) )))
 
-;; Ask for priority when entering articles.
+;; Ask for priority and duedate when entering articles.
 (deffoo nntodo-request-accept-article (group &optional server last)
-  "Add/modify priority header before storing the message."
+  "Add/modify priority and due date header before storing the message."
   (let (prio)
     (save-restriction
       (message-narrow-to-headers-or-head)
@@ -142,6 +167,15 @@
 	(message-remove-header "X-Todo-Priority" nil nil)
 	(mail-position-on-field "X-Todo-Priority")
 	(insert prio))))
+  (let (date)
+    (save-restriction
+      (message-narrow-to-headers-or-head)
+      (unless (message-fetch-field "X-Todo-DueDate")
+	(setq date (todo-gnus-get-duedate))
+	(message-remove-header "X-Todo-DueDate" nil nil)
+	(mail-position-on-field "X-Todo-DueDate")
+	(insert (todo-aux-date-string date))
+	)))
   (nnoo-parent-function 'nntodo
 			'nnmbox-request-accept-article
 			(list group server last)))
@@ -172,6 +206,25 @@
 		   t                    ;require-match
 		   nil nil prio))
 
+
+(defun todo-gnus-get-duedate ()
+  (interactive)
+  (todo-read-delta (calendar-current-date))
+  )
+
+(defun todo-read-delta (today)
+  (let* ((in (read-string "Delta: "))
+     (n (string-to-number in))
+     )
+    (cond
+     ((string-match todo-date-const in) (calendar-read-date nil))
+     ((string-match todo-month-const in) (todo-add-month today n))
+     ((string-match todo-week-const in) (todo-add-week today n))
+     (t (todo-add-day today n))
+     )
+    ))
+
+
 ;; The following section is gross.  Isn't there a better way to do
 ;; this?  Maybe specify a special sending function for nntodo groups?
 ;; But how?
@@ -188,6 +241,8 @@
 
 (add-to-list 'gnus-extra-headers 'X-Todo-Priority)
 (add-to-list 'nnmail-extra-headers 'X-Todo-Priority)
+(add-to-list 'gnus-extra-headers 'X-Todo-DueDate)
+(add-to-list 'nnmail-extra-headers 'X-Todo-DueDate)
 
 ;;; Summary buffer:
 
@@ -195,7 +250,13 @@
 ;; `gnus-summary-line-format'.
 (defun gnus-user-format-function-T (head)
   (let* ((extra-headers (mail-header-extra head)))
-    (cdr (assoc 'X-Todo-Priority extra-headers))))
+    (cdr (assoc 'X-Todo-Priority extra-headers)))
+  (let* ((extra-headers (mail-header-extra head))
+	 (calendar-date-display-form todo-calendar-format)
+	 )
+    (calendar-date-string (todo-aux-string-date 
+			   (cdr (assoc 'X-Todo-DueDate extra-headers))))
+    ))
 
 ;; Sorting by priority.  Code pretty much gleaned from gnus-sum.el
 ;; without any deeper understanding at all.
@@ -224,6 +285,36 @@ Argument REVERSE means reverse order."
   (interactive "P")
   (gnus-summary-sort 'priority reverse))
 
+
+;; sorting by due date
+(defun gnus-article-sort-by-duedate (h1 h2)
+  (let* ((e1 (mail-header-extra h1))
+	 (e2 (mail-header-extra h2))
+	 (d1 (todo-aux-string-date (cdr (assoc 'X-Todo-DueDate e1))))
+	 (d2 (todo-aux-string-date (cdr (assoc 'X-Todo-DueDate e2))))
+	 )
+    (unless d1
+      (error "Unknown due date: %s" d1))
+    (unless d2
+      (error "Unknown due date: %s" d2))
+    (if (equal d1 d2)
+	(< (mail-header-number h1) (mail-header-number h2))
+      (< (calendar-absolute-from-gregorian d1)
+	 (calendar-absolute-from-gregorian d2))
+      )
+    ))
+
+(defun gnus-thread-sort-by-duedate (h1 h2)
+  (gnus-article-sort-by-duedate
+   (gnus-thread-header h1) (gnus-thread-header h2)))
+
+(defun gnus-summary-sort-by-duedate (&optional reverse)
+  "Sort the summary buffer by due date.
+Argument REVERSE means reverse order."
+  (interactive "P")
+  (gnus-summary-sort 'duedate reverse))
+
+
 ;; Todo minor mode.
 
 ;; Gee, this seems to be simple with easy-mmode!
@@ -237,6 +328,8 @@ Argument REVERSE means reverse order."
 	       (cons "Sort by priority" 'gnus-summary-sort-by-priority))
 	 (cons (kbd "i i")
 	       (cons "Add new todo item" 'gnus-summary-post-news))
+     (cons (kbd "i +") 
+	       (cons "Add time to due date" 'gnus-summary-add-time))
 	 (cons (kbd "i d")
 	       (cons "Delete todo item" 'gnus-summary-delete-article)))
    "Todo"))
@@ -250,6 +343,92 @@ With ARG, turn on iff ARG is positive, else turn off."
  " Todo"
  gnus-todo-mode-map)
 
+
+;; add some time to the due date of the todo item
+
+(defun gnus-summary-add-time (article)
+  (interactive (list (gnus-summary-article-number)))
+  (gnus-with-article article
+    (let* ((val  (message-field-value "X-Todo-DueDate"))
+	   (date (todo-aux-string-date val))
+	   (nn (todo-read-delta date))
+	   )
+      (message-remove-header "X-Todo-DueDate" nil nil)
+      (mail-position-on-field "X-Todo-DueDate")
+      (insert (todo-aux-date-string nn))
+      )
+    ))
+      
+
+;;; short todo
+
+;; this allow to create a todo item from stratch
+;; just enter the duedate and the subject
+
+;; where the short todo messages go to
+
+(defvar todo-short-group "nntodo:todo")
+
+(defun todo-short ()
+  (interactive)
+  (let* ((due (todo-read-delta (calendar-current-date)))
+	 (subj (read-string "Subject: "))
+	 (buff (get-buffer-create "*TODO Temp"))
+	 )
+    (save-restriction
+      (save-excursion
+	(set-buffer buff)
+	(message-setup `( (Subject . ,subj)
+			  (X-Todo-DueDate . ,(todo-aux-date-string due))
+			  (Gcc .  ,todo-short-group)
+			  )
+		       )
+	(gnus-inews-do-gcc)
+	(erase-buffer)
+	))
+    ))
+
+
+;; calendar stuff
+
+(defun todo-add-day (today n)
+  "returns a calendar-day n days from today"
+  (calendar-gregorian-from-absolute
+   (+ (calendar-absolute-from-gregorian today) n))
+  )
+
+(defun todo-add-week (today n)
+"returns a calendar-day n weeks from today"
+  (calendar-gregorian-from-absolute
+   (+ (calendar-absolute-from-gregorian today) (* n 7)))
+  )
+  
+(defun todo-add-month (today n)
+"returns a calendar-day n months from today"
+  (calendar-gregorian-from-absolute
+   (+ (calendar-absolute-from-gregorian today) (* n 30)))
+  )
+  
+(defun todo-aux-date-string (date)
+  (if (null date) "01-01-2001"  ; just a fail safe
+    (let ((d (cadr date))
+	  (m (car date))
+	  (y (caddr date)))
+      (if (null d) (setq d 15))
+      (format "%02d-%02d-%4d" m d y)
+      )))
+    
+(defun todo-aux-string-date (s)
+  (if (null s) '(01 01 2001)  ; just a fail safe
+    (let* ((m (string-to-number s))
+	   (ss (substring s (1+ (string-match "-" s))))
+	   (d (string-to-number ss))
+	   (sss (substring ss (1+ (string-match "-" ss))))
+	   (y (string-to-number sss))
+	   )
+      (list m d y))
+  ))
+   
 ;;; Epilog:
 
 (provide 'nntodo)
